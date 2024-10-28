@@ -11,7 +11,7 @@ SORT_KEY_MAX=10e9
 
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 
 def d(msg):
     logging.debug(msg)
@@ -101,7 +101,7 @@ def read_school_data(filename):
     return schools
 
 def geocode_postcode(postcode) -> GeoDataFrame:
-    postcode_locations = geocode("BN1 1AA, UK", provider="Nominatim", domain="localhost:8080", scheme="http")
+    postcode_locations = geocode(f"{postcode}, UK", provider="Nominatim", domain="localhost:8080", scheme="http")
     location = postcode_locations.get_geometry(0)
     location_gdf = GeoDataFrame({'geometry': location}, crs="EPSG:4326")
     return location_gdf
@@ -128,6 +128,9 @@ def find_catchment(postcode, option):
     location_gdf = geocode_postcode(postcode)
     joined_gdf = sjoin(option.geo, location_gdf, how='inner', predicate='intersects')
 
+    d(location_gdf)
+    d(option.geo)
+
     if not joined_gdf.empty:
         overlapping_feature = joined_gdf.iloc[0]
         d(f"found catchment {overlapping_feature['catchment']} for postcode {postcode}")
@@ -139,10 +142,10 @@ def find_catchment(postcode, option):
 def validate_postcode(ctx, param, value):
     # makes sure address has a postcode in it
 
-    if re.match('[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}', value, flags=re.IGNORECASE):
+    if re.search(r'^[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}$', value, flags=re.IGNORECASE):
         return value
     else:
-        return click.BadParameter('Not a valid postcode!')
+        raise click.BadParameter('Not a valid postcode!')
 
 
 schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv')
@@ -158,7 +161,7 @@ options: dict = load_options()
 @click.option('--option', required=True, type=click.Choice(['A', 'B', 'C'], case_sensitive=False))
 @click.option('--prefs', required=True, nargs=3, type=str)
 def cli(postcode, option, prefs):
-    print(find_catchment(postcode, options[option]))
+    print("Your catchment is " + find_catchment(postcode, options[option]))
     
 
 if __name__ == "__main__":
