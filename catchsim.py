@@ -3,6 +3,8 @@ import csv
 from geopandas.tools import geocode
 from geopandas import read_file, GeoSeries, GeoDataFrame, sjoin
 import yaml
+import click
+import re
 
 SORT_KEY_MIN=-10e9
 SORT_KEY_MAX=10e9
@@ -134,13 +136,30 @@ def find_catchment(postcode, option):
         d("Point doesn't intersect with any polygon")
         return False
 
-schools_data = read_school_data('secondary_admissions_actuals_2425.csv')
+def validate_postcode(ctx, param, value):
+    # makes sure address has a postcode in it
 
-for school_id, school in schools_data.items():
-    d((school.name, school.pan, school.total_places, school.offers_made, school.offers_accepted))
-    #print(school)
+    if re.match('[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}', value, flags=re.IGNORECASE):
+        return value
+    else:
+        return click.BadParameter('Not a valid postcode!')
 
-options = load_options()
-d("Loaded options")
 
-print(find_catchment("BN1 1AA", options["B"]))
+schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv')
+options: dict = load_options()
+
+#for school_id, school in schools_data.items():
+#    d((school.name, school.pan, school.total_places, school.offers_made, school.offers_accepted))
+#    #print(school)
+
+#python catchsim.py --postcode "BN1 1AA" --option [A,B,C] --prefs varndean stringer patcham
+@click.command()
+@click.option('--postcode', required=True, type=str, callback=validate_postcode)
+@click.option('--option', required=True, type=click.Choice(['A', 'B', 'C'], case_sensitive=False))
+@click.option('--prefs', required=True, nargs=3, type=str)
+def cli(postcode, option, prefs):
+    print(find_catchment(postcode, options[option]))
+    
+
+if __name__ == "__main__":
+    cli()
