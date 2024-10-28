@@ -18,9 +18,9 @@ is their "tie break" priority.
 
 The places are then filled in 3 passes:
 
-1st preference
-2nd preference
-3rd preference
+ - 1st preference
+ - 2nd preference
+ - 3rd preference
 
 Between each pass, children are removed from the pool and the priorities re-run.
 
@@ -47,4 +47,9 @@ Activate a python3 env (e.g. using `python -mvenv .env && . .env/bin/activate`) 
 
 ```
 pip install -r requirements.txt
+```
+
+WIP but something like this for prototype
+```
+python catchsim.py --postcode "BN1 1AA" --option [N,A,B,C] --pref1 "varndean" --pref2 "stringer" --pref3 "patcham"
 ```
