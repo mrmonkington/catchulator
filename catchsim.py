@@ -9,14 +9,15 @@ import pandas as pd
 import copy
 from pprint import pprint
 import weakref
+import random
 
 
-SORT_KEY_MIN=-10e9
-SORT_KEY_MAX=10e9
+SORT_KEY_MIN=int(-10e9)
+SORT_KEY_MAX=int(10e9)
 
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.WARN)
+logging.basicConfig(level=logging.DEBUG)
 
 lsoa_gdf = read_file('BrightonLSOA_Clean.geojson')
 
@@ -31,17 +32,6 @@ def get_lsoa_centroid(lsoa):
 
 
 @dataclass
-class Child:
-    lsoa: str
-    # 0 = 1st pref, etc
-    prefs: list
-    geo: GeoDataFrame = None
-    def __post__init__(self):
-        self.geo = get_lsoa_centroid(self.lsoa)
-        self.catchment = reverse_catchment(self.geo, option.geo)
-
-
-@dataclass
 class Catchment:
     slug: str
     name: str
@@ -52,6 +42,18 @@ class Catchment:
     # how many children actually qualify for FSM in this area 
     fsm_actual: int = 0
     # geometry
+
+
+@dataclass
+class Child:
+    lsoa: str
+    # 0 = 1st pref, etc
+    prefs: list
+    geo: GeoDataFrame = None
+    catchment: Catchment = None
+    def __post__init__(self):
+        self.geo = get_lsoa_centroid(self.lsoa)
+        self.catchment = reverse_catchment(self.geo, option.geo)
 
 
 @dataclass
@@ -84,6 +86,9 @@ class School:
         self.remaining = self.total_places
 
     def place(self, applications: list):
+        c = len(applications)
+        d(f"placing {c} in {self.slug}")
+        # d(applications)
         if len(applications) > self.remaining:
             raise("Tried to place too many applications")
         self.placed += applications
@@ -103,10 +108,10 @@ class Application:
 
 def create_applications(schools, children) -> list[Application]: 
     applications = []
-    for child in Children:
+    for child in children:
         for pref, school in enumerate(child.prefs):
             app = Application(
-                chlid=child,
+                child=child,
                 school=school,
                 pref=pref
             )
@@ -114,23 +119,35 @@ def create_applications(schools, children) -> list[Application]:
             applications.append(app)
     return applications
             
-def fill_places(school, applications, count) -> list[Child]:
-    qualified=filter(lambda s: s.school == school, applications)
-    qualified.sort(lambda a: a.sort_key)
+def fill_places(school, applications, count) -> list[Application]:
+    d(f"filling {count} places")
+    qualified=list(filter(lambda s: s.school == school, applications))
+    qualified.sort(key=lambda a: a.sort_key)
+    c = len(qualified)
+    d(f"Found {c} qualified apps to fill")
     return qualified[0:count]
 
 def fill_ehcp(school, applications):
+    d("filling ehcp")
     return fill_places(school, applications, school.ehcp_expected)
 
 def fill_sibling(school, applications):
+    d("filling sibling")
     return fill_places(school, applications, school.sibling_expected)
 
 def fill_fsm(school, applications):
+    d("filling fsm")
     return fill_places(school, applications, school.fsm_target)
 
-def accept_offers(applications, placed, preference) -> list[Application]:
+def accept_offers(applications, placed, maximum, preference) -> list[Application]:
     # reduces the applications list according to whether preference was first or not
-    pass
+    placed = list(app for app in applications if app.pref == preference)
+    placed = placed[0:maximum]
+    applications_remaining = list(app for app in applications if app not in placed)
+    ca = len(applications_remaining)
+    cp = len(placed)
+    d(f"accepting {cp} offers leaving {ca} apps")
+    return placed, applications_remaining
 
 def calculate_fsm_chance(school) -> float:
     # include self
@@ -143,10 +160,25 @@ def calculate_fsm_chance(school) -> float:
         return 1.0
     return float(remaining)/float(expected)
 
-def calculate_catchment_chance(applications, school, preference) -> float:
+def fill_catchment(applications, school, preference) -> float:
     qualified=filter(lambda s: s.school == school, applications)
+    qualified=filter(lambda s: s.school.catchment == s.child.catchment, applications)
     qualified.sort(lambda a: a.sort_key)
-    return qualified[0:count]
+    c = len(qualified)
+    d(f"Found {c} qualified apps to fill")
+    return qualified
+    # return qualified[0:school.remaining]
+
+def calculate_catchment_chance(applications, school, preference) -> float:
+    # include self
+    expected = school.fsm_expected + 1
+    # can't place more FSM than we have places remaining after EHCP, sibling, etc
+    remaining = min(school.remaining, school.fsm_target)
+    if remaining == 0:
+        return 0.0
+    if expected <= remaining:
+        return 1.0
+    return float(remaining)/float(expected)
 
 
 @dataclass
@@ -165,19 +197,24 @@ class LA:
     fsm_expected: int
 
 def create_population(schools) -> list:
+    # read in flows for LSOAs and populations, and synthesise
+    # a list of imaginary children with school preferences
+    # based on distance alone
     population_centres: dict = {}
     with open("bh_lsoa_projections_2020_31.csv") as file_obj:
         reader_object = csv.DictReader(file_obj)
         for row in reader_object:
             population_centres[row["geography"]] = round(float(row["2026_scaled_BTN_places"]))
 
-    d("population centres:")
-    d(population_centres)
+    # d("population centres:")
+    # d(population_centres)
+
+    # read the flows
     # orig,dest,flow,btn_cij_flow$flow
     #                ^- actually the flow 
     flows = pd.read_csv("simple_ttm3.csv", index_col=["orig", "dest"], usecols=["orig", "dest", "flow"])
-    d("flows")
-    d(flows)
+    # d("flows")
+    # d(flows)
 
     children = []
     for lsoa, pop in population_centres.items():
@@ -186,12 +223,13 @@ def create_population(schools) -> list:
             urn = school.urn
             pop_flow.append((urn,
                              flows.loc[(lsoa, urn)].iloc[0]))
-        d(pop_flow)
+        # d(pop_flow)
+        # closest first
         pop_flow.sort(reverse=True, key=lambda s: s[1])
         # get top 3
         prefs = pop_flow[0:3]
-        d("Prefs for {(lsoa, urn)}")
-        d(prefs)
+        # d("Prefs for {(lsoa, urn)}")
+        # d(prefs)
         template_child: Child = Child(
             lsoa=lsoa,
             prefs=[
@@ -202,6 +240,9 @@ def create_population(schools) -> list:
         )
         for i in range(0, pop):
             children.append(copy.deepcopy(template_child))
+        d(f"Created {pop} children in {lsoa}")
+    c = len(children)
+    d(f"Created {c} children in total")
     return children
 
 
@@ -300,14 +341,10 @@ def cli(postcode, option, year, prefs, debug):
         logging.basicConfig(level=logging.DEBUG)
 
     schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option], year)
-    #for school_id, school in schools_data.items():
-    #    d((school.urn, school.name, school.pan, school.total_places, school.offers_made, school.offers_accepted))
-    #    #print(school)
 
     user_catchment = find_catchment(postcode, options[option])
     d("Your catchment is {user_catchment}")
     children = create_population(schools_data)
-    pprint(children)
 
     # look up preferred schools
     pref_school = []
@@ -321,35 +358,42 @@ def cli(postcode, option, year, prefs, debug):
     # create big list of application objects, with random sort keys
     applications=create_applications(schools_data, children)
 
-    for school_id, school in schools_data.items():
-        # take some fixed % of population randomly as ehcp
-        placed=fill_ehcp(school, applications)
-        placed=accept_offers(applications, placed, preference=1)
-        school.place(placed)
+    for pref_rank in (0, 1, 2):
 
-    for school_id, school in schools_data.items():
-        # take some fixed % of population randomly as siblings
-        # faith schools are assumed to fill their entire intake in this
-        # way as we have no insight into their admissions
-        # TODO spread a bit further
-        placed=fill_sibling(school, applications)
-        placed=accept_offers(applications, placed, preference=1)
-        school.place(placed)
+        for school_id, school in schools_data.items():
+            # take some fixed % of population randomly as ehcp
+            placed = fill_ehcp(school, applications)
+            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+            school.place(placed)
 
-    # this would just be FSM target / FSM expected
-    pref_school[0]["fsm_chance"] = calculate_fsm_chance(
-        pref_school[0]["school"]
-    )
+        for school_id, school in schools_data.items():
+            # take some fixed % of population randomly as siblings
+            # faith schools are assumed to fill their entire intake in this
+            # way as we have no insight into their admissions
+            # TODO spread a bit further
+            placed = fill_sibling(school, applications)
+            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+            school.place(placed)
 
-    for school_id, school in schools_data.items():
-        # take some fixed % of population randomly as fsm
-        placed=fill_fsm(school, applications)
-        placed=accept_offers(applications, placed, preference=1)
-        school_id.place(placed)
+        # this would just be FSM target / FSM expected
+        pref_school[pref_rank]["fsm_chance"] = calculate_fsm_chance(
+            pref_school[pref_rank]["school"]
+        )
 
-    pref_school[0]["catchment_chance"] = calculate_chance(application, preference=pref_school[0]["school"])
-    placed=fill_catchment(schools, applications)
-    remove_applications(applications, placed, preference=1)
+        for school_id, school in schools_data.items():
+            # take some fixed % of population randomly as fsm
+            placed = fill_fsm(school, applications)
+            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+            school.place(placed)
+
+        pref_school[pref_rank]["catchment_chance"] = calculate_catchment_chance(
+            application, preference=pref_school[pref_rank]["school"]
+        )
+
+        for school_id, school in schools_data.items():
+            placed = fill_catchment(school, applications)
+            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+            school.place(placed)
 
 
 if __name__ == "__main__":
