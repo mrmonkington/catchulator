@@ -51,5 +51,5 @@ pip install -r requirements.txt
 
 WIP but something like this for prototype
 ```
-python catchsim.py --postcode "BN1 1AA" --option [N,A,B,C] --pref1 "varndean" --pref2 "stringer" --pref3 "patcham"
+python catchsim.py --postcode "BN1 1AA" --option [X,A,B,C] --pref1 "varndean" --pref2 "stringer" --pref3 "patcham --year 2024"
 ```
