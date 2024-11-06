@@ -74,9 +74,21 @@ class Child:
     prefs: list
     geo: GeoDataFrame = None
     catchment: Catchment = None
+    uid: int = None
     def locate(self, option):
-        self.geo = get_lsoa_centroid(self.lsoa)
-        self.catchment = reverse_catchment(self.geo, option.geo)
+        # some special cases for when LSOA centroid falls out of the catchment maps
+        if self.lsoa == "E01016999":
+            self.geo = geocode_postcode("BN1 5LP")
+        elif self.lsoa == "E01016916":
+            self.geo = geocode_postcode("BN41 2WP")
+        elif self.lsoa == "E01016885":
+            self.geo = geocode_postcode("BN3 8GP")
+        else:
+            self.geo = get_lsoa_centroid(self.lsoa)
+        self.catchment = option.catchments[reverse_catchment(self.geo, option.geo)]
+    def __hash__(self):
+        return self.id
+
 
 
 @dataclass
@@ -108,7 +120,7 @@ class School:
     remaining: int = 0
 
     def __post_init__(self):
-        self.remaining = self.total_places
+        self.remaining = self.pan
 
     def place(self, applications: list):
         c = len(applications)
@@ -144,21 +156,19 @@ def create_applications(schools, children) -> list[Application]:
             applications.append(app)
     return applications
 
-def summarise_children(children, option):
-    o("Children summary")
-    kids = 0
-    catchment_totals = {}
-    for catchment in option.catchments:
-        catchment_totals[catchment.slug] = 0
+def summarise_app_children(option, schools, applications):
+    o("Children in catchment summary")
+    ctot = {}
+    for cs, ca in option.catchments.items():
+        ctot[cs] = 0
+    children = set()
     for app in applications:
-        catchment_totals[app.catchment.slug] += 1
-        kids += 1
-    o("Catchment Totals")
-    otab(catchment_totals)
-    o(f"Total kids = {kids}")
-    #d(applications)
+        children.add((app.child.uid, app.child.catchment.slug))
+    for child, cs in children:
+        ctot[cs] += 1
+    otab(ctot)
 
-def summarise_applications(schools, applications):
+def summarise_applications(option, schools, applications):
     o("Applications summary")
     schools_totals = {}
     for school in schools:
@@ -171,6 +181,7 @@ def summarise_applications(schools, applications):
     otab(schools_totals)
     o("Totals")
     o(totals)
+    summarise_app_children(option, schools, applications)
     #d(applications)
 
 def summarise_placed(schools):
@@ -183,9 +194,11 @@ def summarise_placed(schools):
             
 def find_qualified_apps(school, applications) -> list[Application]:
     d(f"Finding applicants for {school.slug}")
-    qualified=list(filter(lambda s: s.school == school, applications))
+    qualified=list(filter(lambda s: s.school.slug == school.slug, applications))
     qualified.sort(key=lambda a: a.sort_key)
     c = len(qualified)
+    if c > 0:
+        d(qualified[0].sort_key)
     d(f" - Found {c} qualified apps")
     # return qualified[0:count]
     return qualified
@@ -199,7 +212,7 @@ def search_applications(needle, haystack):
 def accept_offers(applications, placed, maximum, preference) -> list[Application]:
     d(f"accepting offers if pref {preference}")
     # reduces the applications list according to whether preference was first or not
-    placed = list(app for app in applications if app.pref == preference)
+    placed = list(app for app in placed if app.pref == preference)
     placed = placed[0:maximum]
     # get the kids placed
     children_placed = list(app.child for app in placed)
@@ -226,7 +239,7 @@ def find_qualified_apps_in_catchment(school, applications) -> float:
     # qualified = list()
     # for s in applications:
     qualified=list(
-        filter(lambda s: s.school == school and s.school.catchment == s.child.catchment, applications)
+        filter(lambda s: s.school.slug == school.slug and school.catchment.slug == s.child.catchment.slug, applications)
     )
     qualified.sort(key=lambda a: a.sort_key)
     c = len(qualified)
@@ -296,23 +309,27 @@ def create_population(schools, option, year) -> list:
         pop_flow.sort(reverse=True, key=lambda s: s[1])
         # we use top 3 for actual prefs and remainder for fallback
         prefs = pop_flow
-        # d("Prefs for {(lsoa, urn)}")
-        # d(prefs)
         # let's take 6 for now
+        pref_template = [
+            get_school_by_urn(schools, prefs[0][0]),
+            get_school_by_urn(schools, prefs[1][0]),
+            get_school_by_urn(schools, prefs[2][0]),
+            get_school_by_urn(schools, prefs[3][0]),
+            get_school_by_urn(schools, prefs[4][0]),
+            get_school_by_urn(schools, prefs[5][0]),
+        ]
         template_child: Child = Child(
             lsoa=lsoa,
-            prefs=[
-                get_school_by_urn(schools, prefs[0][0]),
-                get_school_by_urn(schools, prefs[1][0]),
-                get_school_by_urn(schools, prefs[2][0]),
-                get_school_by_urn(schools, prefs[3][0]),
-                get_school_by_urn(schools, prefs[4][0]),
-                get_school_by_urn(schools, prefs[5][0]),
-            ]
+            prefs=pref_template
         )
         template_child.locate(option)
+        d(f"Prefs for {lsoa} x {pop} kids in catchment {template_child.catchment.slug}")
+        d(pformat([p.slug for p in pref_template]))
         for i in range(0, pop):
-            children.append(copy.deepcopy(template_child))
+            child_instance = copy.deepcopy(template_child)
+            # just need an ID for hashing
+            child_instance.uid = random.randint(SORT_KEY_MIN, SORT_KEY_MAX)
+            children.append(child_instance)
         # d(f"Created {pop} children in {lsoa}")
     c = len(children)
     d(f"Created {c} children in total")
@@ -435,7 +452,7 @@ def cli(postcode, option, year, prefs, debug):
     # create big list of application objects, with random sort keys
     applications=create_applications(schools_data, children)
 
-    summarise_applications(schools_data, applications)
+    summarise_applications(options[option], schools_data, applications)
 
     # assume some priotities get their first choice
     d(f"------- PLACING EHCP (FIRST PREF) -----------")
@@ -482,6 +499,7 @@ def cli(postcode, option, year, prefs, debug):
         school.place(placed)
     d("\n")
 
+    summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
 
     d(f"------- PLACING CATCHMENT -----------")
@@ -497,6 +515,9 @@ def cli(postcode, option, year, prefs, debug):
             school.place(placed)
     d("\n")
 
+    summarise_applications(options[option], schools_data, applications)
+    summarise_placed(schools_data)
+
     d(f"------- PLACING OUT OF CATCHMENT -----------")
     for pref_rank in (0, 1, 2):
         d(f"------- PREF {pref_rank} -----------")
@@ -509,6 +530,9 @@ def cli(postcode, option, year, prefs, debug):
             placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
             school.place(placed)
     d("\n")
+
+    summarise_applications(options[option], schools_data, applications)
+    summarise_placed(schools_data)
 
     d(f"------- PLACING FALLBACK -----------")
     for pref_rank in (3, 4, 5):
@@ -524,7 +548,7 @@ def cli(postcode, option, year, prefs, debug):
     d("\n")
 
     d(f"------- SUMMARIES -----------")
-    summarise_applications(schools_data, applications)
+    summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
 
 
