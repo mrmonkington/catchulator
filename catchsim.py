@@ -556,6 +556,14 @@ if __name__ == "__main__":
     cli()
 
 def anneal(option_code, year):
+    # used for simulated annleaing of preference factors
+    # usage:
+    # pip install jupyterlab
+    # jupyter lab
+    # > improt catchsim
+    # > mini = catchsim.anneal("B", 2024)
+    # wait an hour and get final params
+    # > mini.current_state
     option = options[option_code]
 
     schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', option, year)
