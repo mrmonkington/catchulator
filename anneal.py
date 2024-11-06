@@ -93,6 +93,7 @@ class minimize():
             if E_n < self.best_energy:
                 self.best_energy = E_n
                 self.best_state = proposed_neighbor[:]
+            print( f"Energy this step: {E_n} (best: {self.best_energy})" )
 
             # persist some info for later
             self.hist.append([

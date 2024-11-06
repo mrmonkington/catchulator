@@ -51,5 +51,12 @@ pip install -r requirements.txt
 
 WIP but something like this for prototype
 ```
-python catchsim.py --postcode "BN1 1AA" --option [A,B,C] --prefs varndean stringer patcham --year 2024
+python catchsim.py sim --postcode "BN1 1AA" --option [A,B,C] --prefs varndean stringer patcham --year 2024
 ```
+
+To run the simulated annealing in order to tune preference params, use
+```
+python catchsim.py anneal --option [A,B,C] --year 2024
+```
+
+It will try to find params that generate a similar distribution of preferences to the 2024 actuals. Plug the geo and pop numbers into `secondary_admissions_actuals_2425.csv`.

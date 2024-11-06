@@ -420,15 +420,18 @@ def get_school_by_urn(schools, urn):
 
 options: dict = load_options()
 
+@click.group()
+def main():
+    pass
 
 #python catchsim.py --postcode "BN1 1AA" --option [A,B,C] --prefs varndean stringer patcham
-@click.command()
+@main.command()
 @click.option('--postcode', required=True, type=str, callback=validate_postcode)
 @click.option('--option', required=True, type=click.Choice(['A', 'B', 'C'], case_sensitive=False))
 @click.option('--year', required=True, type=click.Choice(['2024', '2026']))
 @click.option('--prefs', required=True, nargs=3, type=str)
 @click.option('--debug', is_flag=True, default=False)
-def cli(postcode, option, year, prefs, debug):
+def sim(postcode, option, year, prefs, debug):
     if(debug):
         logging.basicConfig(level=logging.DEBUG)
 
@@ -551,11 +554,10 @@ def cli(postcode, option, year, prefs, debug):
     summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
 
-
-if __name__ == "__main__":
-    cli()
-
-def anneal(option_code, year):
+@main.command()
+@click.option('--option', required=True, type=click.Choice(['A', 'B', 'C'], case_sensitive=False))
+@click.option('--year', required=True, type=click.Choice(['2024', '2026']))
+def anneal(option, year):
     # used for simulated annleaing of preference factors
     # usage:
     # pip install jupyterlab
@@ -564,7 +566,7 @@ def anneal(option_code, year):
     # > mini = catchsim.anneal("B", 2024)
     # wait an hour and get final params
     # > mini.current_state
-    option = options[option_code]
+    option = options[option]
 
     schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', option, year)
 
@@ -579,10 +581,15 @@ def anneal(option_code, year):
     cost_func = partial(anneal_iterate, schools_data, option, year)
     # min max
     bounds = ((0.0001, 30.0),)*len(geo_scaling)*2
-    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=3000,
+    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=500,
                     bounds=bounds, cooling_schedule='linear', damping=0.001)
     mini.results()
-    return mini
+    o("Final params")
+    ns = len(schools_data)
+    o("print geo:")
+    o(mini.current_state[0:ns])
+    o("print pop:")
+    o(mini.current_state[ns:])
 
 
 def get_prefs_dist(schools, children):
@@ -615,4 +622,7 @@ def anneal_iterate(schools_data, option, year, x):
     cost = anneal_cost(schools_data, children)
     return cost
 
+
+if __name__ == "__main__":
+    main()
 
