@@ -91,11 +91,11 @@ class School:
     total_places: int
     offers_made: int
     offers_accepted: int
-    #first_prefs_received: int
+    first_prefs_received: int
     #first_prefs_accepted: float
-    #second_prefs_received: int
+    second_prefs_received: int
     #second_prefs_accepted: float
-    #third_prefs_received: int
+    third_prefs_received: int
     #third_prefs_accepted: float
     #fsm_eligible_percent: float
     fsm_target: int
@@ -336,11 +336,11 @@ def read_school_data(filename, option, year):
                 total_places=int(row['total_number_places_offered']),
                 offers_made=int(row['number_preferred_offers']),
                 offers_accepted=int(row['number_1st_preference_offers']),
-                #first_prefs_received=int(row['times_put_as_1st_preference']),
+                first_prefs_received=int(row['times_put_as_1st_preference']),
                 #first_prefs_accepted=float(row['proportion_1stprefs_v_1stprefoffers']),
-                #second_prefs_received=int(row['times_put_as_2nd_preference']),
+                second_prefs_received=int(row['times_put_as_2nd_preference']),
                 #second_prefs_accepted=float(row['proportion_1stprefs_v_totaloffers']),
-                #third_prefs_received=int(row['times_put_as_3rd_preference']),
+                third_prefs_received=int(row['times_put_as_3rd_preference']),
                 #third_prefs_accepted=float(row['proportion_1stprefs_v_1stprefoffers']),
                 fsm_expected=round(float(row['FSM_expected'])),
                 fsm_target=round(float(row['FSM_target'])),
@@ -539,20 +539,48 @@ def anneal(option_code, year):
     # vars to iterate
     # geo_scaling
     # popularity_scaling
-    anneal_iterate(geo_scaling, popularity_scaling, schools_data, option)
+    geo_scaling = [school.geo_scaling for school_slug, school in schools_data.items()]
+    popularity_scaling = [school.popularity_scaling for school_slug, school in schools_data.items()]
+    from anneal import minimize
+    from functools import partial
+    x0 = geo_scaling + popularity_scaling
+    cost_func = partial(anneal_iterate, schools_data, option, year)
+    # min max
+    bounds = ((0.0001, 30.0),)*len(geo_scaling)*2
+    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=3000,
+                    bounds=bounds, cooling_schedule='linear', damping=0.001)
+    mini.results()
+    return mini
 
-def get_applications_dist(schools, applications):
+
+def get_prefs_dist(schools, children):
     schools_totals = {}
     for school in schools:
         schools_totals[school] = list((0,0,0,0,0,0))
-    totals = list((0,0,0,0,0,0))
-    for app in applications:
-        schools_totals[app.school.slug][app.pref] += 1
-        totals[app.pref] += 1
+    for child in children:
+        for pref_rank in (0,1,2):
+            schools_totals[child.prefs[pref_rank].slug][pref_rank] += 1
+    return schools_totals
 
-def anneal_iterate(geo_scaling, popularity_scaling, schools_data, option):
+def anneal_cost(schools, applications):
+    dist = get_prefs_dist(schools, applications)
+    print(dist)
+    cost = 0
+    for school_slug, school in schools.items():
+        cost += abs(dist[school_slug][0] - school.first_prefs_received)
+        cost += abs(dist[school_slug][1] - school.second_prefs_received)
+        cost += abs(dist[school_slug][2] - school.third_prefs_received)
+    return cost
+
+# def anneal_iterate(geo_scaling, popularity_scaling, schools_data, option, year):
+def anneal_iterate(schools_data, option, year, x):
     # merge schools_data and scalings
+    ns = len(schools_data)
+    for c, (school_slug, school) in enumerate(schools_data.items()):
+        school.geo_scaling = x[c]
+        school.popularity_scaling = x[ns+c]
     children = create_population(schools_data, option, year)
-    applications=create_applications(schools_data, children)
-    get_application_dist(schools_data, applications)
+    cost = anneal_cost(schools_data, children)
+    return cost
+
 
