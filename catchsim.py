@@ -358,14 +358,16 @@ def create_population(schools, option, year) -> list:
     return children
 
 
-def read_school_data(filename, option, year):
+def read_school_data(filename, option, year, geo_scaling=None, popularity_scaling=None, oversubscription_penalty=None):
     # model is X,A,B,C
     # year is 2024 or 2026
+    # geo_scaling and pop_scaling are override parameter lists, or None if no override
+    #  and values in datafile should be used
     schools = {}
     with open(filename) as file_obj:
         reader_object = csv.DictReader(file_obj)
-        for row in reader_object:
-            schools[row['school_id']] = School(
+        for ind, row in enumerate(reader_object):
+            s = School(
                 slug=row['school_id'],
                 urn=int(row['school_urn']),
                 name=row['school_name'],
@@ -388,6 +390,14 @@ def read_school_data(filename, option, year):
                 sibling_expected=round(float(row['p3_sibling_offered'])),
                 catchment=option.catchments[str(row[f"option{option.slug}"])],
             )
+            # override scaling - useful for param development
+            if geo_scaling:
+                s.geo_scaling = geo_scaling[ind]
+            if popularity_scaling:
+                s.popularity_scaling = popularity_scaling[ind]
+            if oversubscription_penalty:
+                s.oversubscription_penalty = oversubscription_penalty[ind]
+            schools[row['school_id']] = s
     return schools
 
 def geocode_postcode(postcode) -> GeoDataFrame:
@@ -454,11 +464,25 @@ def main():
 @click.option('--year', required=True, type=click.Choice(['2024', '2026']))
 @click.option('--prefs', required=True, nargs=3, type=str)
 @click.option('--debug', is_flag=True, default=False)
-def sim(postcode, option, year, prefs, debug):
+@click.option('--geo_scaling', required=False, type=str, default=None)
+@click.option('--popularity_scaling', required=False, type=str, default=None)
+@click.option('--oversubscription_penalty', required=False, type=str, default=None)
+def sim(postcode, option, year, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty):
     if(debug):
         logging.basicConfig(level=logging.DEBUG)
 
-    schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option], year)
+
+
+    if geo_scaling:
+        geo_scaling = [float(c.strip()) for c in geo_scaling.split(',')]
+    if popularity_scaling:
+        popularity_scaling = [float(c.strip()) for c in popularity_scaling.split(',')]
+    if oversubscription_penalty:
+        oversubscription_penalty = [float(c.strip()) for c in oversubscription_penalty.split(',')]
+    schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option], year,
+                                          geo_scaling=geo_scaling,
+                                          popularity_scaling=popularity_scaling,
+                                          oversubscription_penalty=oversubscription_penalty)
 
     user_catchment = find_catchment(postcode, options[option])
     d(f"Your catchment is {user_catchment}")
@@ -580,7 +604,13 @@ def sim(postcode, option, year, prefs, debug):
 @main.command()
 @click.option('--option', required=True, type=click.Choice(['A', 'B', 'C', 'X'], case_sensitive=False))
 @click.option('--year', required=True, type=click.Choice(['2024', '2026']))
-def anneal(option, year):
+@click.option('--geo_scaling', required=False, type=str, default=None)
+@click.option('--popularity_scaling', required=False, type=str, default=None)
+@click.option('--oversubscription_penalty', required=False, type=str, default=None)
+@click.option('--damping', required=False, type=float, default=0.01)
+@click.option('--schedule', required=False, type=str, default="linear")
+@click.option('--tmax', required=False, type=float, default=500.0)
+def anneal(option, year, geo_scaling, popularity_scaling, oversubscription_penalty, damping, schedule, tmax):
     # used for simulated annleaing of preference factors
     # usage:
     # pip install jupyterlab
@@ -596,23 +626,35 @@ def anneal(option, year):
     # vars to iterate
     # geo_scaling
     # popularity_scaling
-    geo_scaling = [school.geo_scaling for school_slug, school in schools_data.items()]
-    popularity_scaling = [school.popularity_scaling for school_slug, school in schools_data.items()]
+    if geo_scaling:
+        geo_scaling = [float(c.strip()) for c in geo_scaling.split(',')]
+    else:
+        geo_scaling = [school.geo_scaling for school_slug, school in schools_data.items()]
+    if popularity_scaling:
+        popularity_scaling = [float(c.strip()) for c in popularity_scaling.split(',')]
+    else:
+        popularity_scaling = [school.popularity_scaling for school_slug, school in schools_data.items()]
+    if oversubscription_penalty:
+        oversubscription_penalty = [float(c.strip()) for c in oversubscription_penalty.split(',')]
+    else:
+        oversubscription_penalty = [school.oversubscription_penalty for school_slug, school in schools_data.items()]
     from anneal import minimize
     from functools import partial
-    x0 = geo_scaling + popularity_scaling
+    x0 = geo_scaling + popularity_scaling + oversubscription_penalty
     cost_func = partial(anneal_iterate, schools_data, option, year)
     # min max
-    bounds = ((0.0001, 30.0),)*len(geo_scaling)*2
-    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=500,
-                    bounds=bounds, cooling_schedule='linear', damping=0.001)
+    bounds = ((0.0001, 30.0),)*len(geo_scaling)*3
+    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=tmax,
+                    bounds=bounds, cooling_schedule=schedule, damping=damping)
     mini.results()
     o("Final params")
     ns = len(schools_data)
     o("print geo:")
     o(mini.current_state[0:ns])
     o("print pop:")
-    o(mini.current_state[ns:])
+    o(mini.current_state[ns:2*ns])
+    o("print overpen:")
+    o(mini.current_state[2*ns:])
 
 
 def get_prefs_dist(schools, children):
@@ -640,6 +682,7 @@ def anneal_iterate(schools_data, option, year, x):
     for c, (school_slug, school) in enumerate(schools_data.items()):
         school.geo_scaling = x[c]
         school.popularity_scaling = x[ns+c]
+        school.oversubscription_penalty = x[2*ns+c]
     children = create_population(schools_data, option, year)
     cost = anneal_cost(schools_data, children)
     return cost
