@@ -15,6 +15,14 @@ from itertools import count
 import sys
 import math
 
+# use a population scaling for CASA's projections to create same populations as estimated
+# by BHCC
+POP_SCALING = {
+    "2024": 2267.0/2560.0,
+    "2026": 2276.0/2410.0,
+    "2030": 2023.0/2214.0
+}
+
 def stack_size2a(size=2):
     """Get stack size for caller's frame.
     """
@@ -31,7 +39,7 @@ SORT_KEY_MAX=int(10e9)
 
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.WARN)
+logging.basicConfig(level=logging.DEBUG)
 
 lsoa_gdf = read_file('BrightonLSOA_Clean.geojson')
 
@@ -71,7 +79,7 @@ class Catchment:
 class Child:
     lsoa: str
     # 0 = 1st pref, etc
-    prefs: list
+    prefs: list = None
     geo: GeoDataFrame = None
     catchment: Catchment = None
     uid: int = None
@@ -83,6 +91,8 @@ class Child:
             self.geo = geocode_postcode("BN41 2WP")
         elif self.lsoa == "E01016885":
             self.geo = geocode_postcode("BN3 8GP")
+        elif self.lsoa == "E01017011":
+            self.geo = geocode_postcode("BN2 6SG")
         else:
             self.geo = get_lsoa_centroid(self.lsoa)
         self.catchment = option.catchments[reverse_catchment(self.geo, option.geo)]
@@ -98,6 +108,7 @@ class School:
     urn: str
     geo_scaling: float
     popularity_scaling: float
+    oversubscription_penalty: float
     # published admissions number
     pan: int
     total_places: int
@@ -282,8 +293,11 @@ def create_population(schools, option, year) -> list:
     with open("bh_lsoa_projections_2020_31.csv") as file_obj:
         reader_object = csv.DictReader(file_obj)
         for row in reader_object:
-            #population_centres[row["geography"]] = round(float(row[f"{year}_scaled_BTN_places"]))
-            population_centres[row["geography"]] = round(float(row[f"{year}_realistic_apps"]))
+            # adjust the CASA projections to match BHCC projections
+            population_centres[row["geography"]] = round(
+                float(row[f"{year}_scaled_BTN_places"]) * POP_SCALING[year]
+            )
+            #population_centres[row["geography"]] = round(float(row[f"{year}_realistic_apps"]))
 
     # read the flows
     # orig,dest,mins,flow
@@ -294,15 +308,27 @@ def create_population(schools, option, year) -> list:
     children = list()
     for lsoa, pop in population_centres.items():
         pop_flow = list()
+        template_child: Child = Child(
+            lsoa=lsoa
+        )
+        d(f"LSOA {lsoa} ")
+        template_child.locate(option)
         for school_id, school in schools.items():
             urn = school.urn
             # how hard to get to school? Start with 'mins away'
-            difficulty = flows.loc[(lsoa, urn)].iloc[0]
+            # higher is worse
+            mins = flows.loc[(lsoa, urn)].iloc[0]
             # make it a bit nonlinear using geo factors - e.g. faith schools attract from further away
-            difficulty = math.exp(-1 * school.geo_scaling * difficulty)
+            # higher is better
+            difficulty = math.exp(-1 * school.geo_scaling * mins)
             # scale by popularity factors - e.g. faith schools don't attract atheists
             # e.g. poor ofsted will count against a little
+            # higher is better
             difficulty = difficulty * school.popularity_scaling
+            # also consider in catchment and oversubscription - no point going for a popular school out of catchment
+            # higher is better
+            if template_child.catchment.slug != school.catchment.slug:
+               difficulty = difficulty * school.oversubscription_penalty
             pop_flow.append((urn, difficulty))
         # d(pop_flow)
         # closest first
@@ -318,11 +344,7 @@ def create_population(schools, option, year) -> list:
             get_school_by_urn(schools, prefs[4][0]),
             get_school_by_urn(schools, prefs[5][0]),
         ]
-        template_child: Child = Child(
-            lsoa=lsoa,
-            prefs=pref_template
-        )
-        template_child.locate(option)
+        template_child.prefs=pref_template
         d(f"Prefs for {lsoa} x {pop} kids in catchment {template_child.catchment.slug}")
         d(pformat([p.slug for p in pref_template]))
         for i in range(0, pop):
@@ -349,6 +371,7 @@ def read_school_data(filename, option, year):
                 name=row['school_name'],
                 geo_scaling=float(row['geo_scaling']),
                 popularity_scaling=float(row['popularity_scaling']),
+                oversubscription_penalty=float(row['oversubscription_penalty']),
                 pan=int(row[f"pan_{year}"]),
                 total_places=int(row['total_number_places_offered']),
                 offers_made=int(row['number_preferred_offers']),
@@ -400,7 +423,7 @@ def reverse_catchment(point_geo, catchment_geo):
 
     if not joined_gdf.empty:
         overlapping_feature = joined_gdf.iloc[0]
-        # d(f"found catchment {overlapping_feature['catchment']}")
+        d(f"found catchment {overlapping_feature['catchment']}")
         return overlapping_feature['catchment']
     else:
         d("Point doesn't intersect with any polygon")
@@ -427,7 +450,7 @@ def main():
 #python catchsim.py --postcode "BN1 1AA" --option [A,B,C] --prefs varndean stringer patcham
 @main.command()
 @click.option('--postcode', required=True, type=str, callback=validate_postcode)
-@click.option('--option', required=True, type=click.Choice(['A', 'B', 'C'], case_sensitive=False))
+@click.option('--option', required=True, type=click.Choice(['A', 'B', 'C', 'X'], case_sensitive=False))
 @click.option('--year', required=True, type=click.Choice(['2024', '2026']))
 @click.option('--prefs', required=True, nargs=3, type=str)
 @click.option('--debug', is_flag=True, default=False)
@@ -555,7 +578,7 @@ def sim(postcode, option, year, prefs, debug):
     summarise_placed(schools_data)
 
 @main.command()
-@click.option('--option', required=True, type=click.Choice(['A', 'B', 'C'], case_sensitive=False))
+@click.option('--option', required=True, type=click.Choice(['A', 'B', 'C', 'X'], case_sensitive=False))
 @click.option('--year', required=True, type=click.Choice(['2024', '2026']))
 def anneal(option, year):
     # used for simulated annleaing of preference factors
@@ -611,7 +634,6 @@ def anneal_cost(schools, applications):
         cost += abs(dist[school_slug][2] - school.third_prefs_received)
     return cost
 
-# def anneal_iterate(geo_scaling, popularity_scaling, schools_data, option, year):
 def anneal_iterate(schools_data, option, year, x):
     # merge schools_data and scalings
     ns = len(schools_data)

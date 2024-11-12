@@ -1,4 +1,21 @@
 ---
+- slug: X
+  name: Option X - Existing
+  geofile: 'catchment_existing_converted.geojson'
+  catchments:
+    # IDs must match those used in geojson for option
+    - slug: PACA
+      name: PACA
+    - slug: Hove
+      name: Hove
+    - slug: Patcham
+      name: Patcham
+    - slug: BACA
+      name: BACA
+    - slug: VarndeanStr
+      name: VarndeanStr
+    - slug: Longhill
+      name: Longhill
 - slug: A
   name: Option A - Tweak
   geofile: 'catchment_01.geojson'
