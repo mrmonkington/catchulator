@@ -39,7 +39,7 @@ SORT_KEY_MAX=int(10e9)
 
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARN)
 
 lsoa_gdf = read_file('BrightonLSOA_Clean.geojson')
 
@@ -456,7 +456,7 @@ def main():
 @click.option('--debug', is_flag=True, default=False)
 def sim(postcode, option, year, prefs, debug):
     if(debug):
-        logging.basicConfig(level=logging.WARN)
+        logging.basicConfig(level=logging.DEBUG)
 
     schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option], year)
 
