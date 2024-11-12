@@ -456,7 +456,7 @@ def main():
 @click.option('--debug', is_flag=True, default=False)
 def sim(postcode, option, year, prefs, debug):
     if(debug):
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.WARN)
 
     schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option], year)
 
