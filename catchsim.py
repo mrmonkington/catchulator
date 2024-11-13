@@ -141,6 +141,7 @@ class School:
             raise("Tried to place too many applications")
         self.placed += applications
         self.remaining -= len(applications)
+        d(f" -> placed {c} in {self.slug} (remaining {self.remaining})")
 
 
 @dataclass
@@ -168,7 +169,7 @@ def create_applications(schools, children) -> list[Application]:
     return applications
 
 def summarise_app_children(option, schools, applications):
-    o("Children in catchment summary")
+    d("Children in catchment summary")
     ctot = {}
     for cs, ca in option.catchments.items():
         ctot[cs] = 0
@@ -177,10 +178,10 @@ def summarise_app_children(option, schools, applications):
         children.add((app.child.uid, app.child.catchment.slug))
     for child, cs in children:
         ctot[cs] += 1
-    otab(ctot)
+    dtab(ctot)
 
 def summarise_applications(option, schools, applications):
-    o("Applications summary")
+    d("Applications summary")
     schools_totals = {}
     for school in schools:
         schools_totals[school] = list((0,0,0,0,0,0))
@@ -188,24 +189,24 @@ def summarise_applications(option, schools, applications):
     for app in applications:
         schools_totals[app.school.slug][app.pref] += 1
         totals[app.pref] += 1
-    o("Schools Totals")
-    otab(schools_totals)
-    o("Totals")
-    o(totals)
+    d("Schools Totals")
+    dtab(schools_totals)
+    d("Totals")
+    d(totals)
     summarise_app_children(option, schools, applications)
     #d(applications)
 
 def summarise_placed(schools):
-    o("Placed summary")
+    d("Placed summary")
     t = 0
     for school_id, school in schools.items():
-        o(f"Total placed for {school_id} is {len(school.placed)}")
+        d(f"Total placed for {school_id} is {len(school.placed)}")
         t += len(school.placed)
-    o(f" - Placed {t} in total")
+    d(f" - Placed {t} in total")
             
 def find_qualified_apps(school, applications) -> list[Application]:
     d(f"Finding applicants for {school.slug}")
-    qualified=list(filter(lambda s: s.school.slug == school.slug, applications))
+    qualified=list(filter(lambda s: s.school.slug == school.slug and s.pref in (0,1,2), applications))
     qualified.sort(key=lambda a: a.sort_key)
     c = len(qualified)
     if c > 0:
@@ -250,7 +251,9 @@ def find_qualified_apps_in_catchment(school, applications) -> float:
     # qualified = list()
     # for s in applications:
     qualified=list(
-        filter(lambda s: s.school.slug == school.slug and school.catchment.slug == s.child.catchment.slug, applications)
+        filter(lambda s: s.school.slug == school.slug \
+            and school.catchment.slug == s.child.catchment.slug \
+            and s.pref in (0,1,2), applications)
     )
     qualified.sort(key=lambda a: a.sort_key)
     c = len(qualified)
@@ -263,6 +266,9 @@ def calculate_catchment_chance(applications, school) -> float:
     expected = len(applications) + 1
     # can't place more FSM than we have places remaining after EHCP, sibling, etc
     remaining = school.remaining
+    d(f"School: {school.slug}")
+    d(f"Remaining: {remaining}")
+    d(f"Expected: {expected}")
     if remaining == 0:
         return 0.0
     if expected <= remaining:
@@ -285,7 +291,7 @@ class LA:
     apps_expected: int
     fsm_expected: int
 
-def create_population(schools, option, year) -> list:
+def create_population(schools, option, popyear) -> list:
     # read in flows for LSOAs and populations, and synthesise
     # a list of imaginary children with school preferences
     # based on distance alone
@@ -295,7 +301,7 @@ def create_population(schools, option, year) -> list:
         for row in reader_object:
             # adjust the CASA projections to match BHCC projections
             population_centres[row["geography"]] = round(
-                float(row[f"{year}_scaled_BTN_places"]) * POP_SCALING[year]
+                float(row[f"{popyear}_scaled_BTN_places"]) * POP_SCALING[popyear]
             )
             #population_centres[row["geography"]] = round(float(row[f"{year}_realistic_apps"]))
 
@@ -358,7 +364,7 @@ def create_population(schools, option, year) -> list:
     return children
 
 
-def read_school_data(filename, option, year, geo_scaling=None, popularity_scaling=None, oversubscription_penalty=None):
+def read_school_data(filename, option, popyear, panyear, geo_scaling=None, popularity_scaling=None, oversubscription_penalty=None):
     # model is X,A,B,C
     # year is 2024 or 2026
     # geo_scaling and pop_scaling are override parameter lists, or None if no override
@@ -374,7 +380,7 @@ def read_school_data(filename, option, year, geo_scaling=None, popularity_scalin
                 geo_scaling=float(row['geo_scaling']),
                 popularity_scaling=float(row['popularity_scaling']),
                 oversubscription_penalty=float(row['oversubscription_penalty']),
-                pan=int(row[f"pan_{year}"]),
+                pan=int(row[f"pan_{panyear}"]),
                 total_places=int(row['total_number_places_offered']),
                 offers_made=int(row['number_preferred_offers']),
                 offers_accepted=int(row['number_1st_preference_offers']),
@@ -461,13 +467,14 @@ def main():
 @main.command()
 @click.option('--postcode', required=True, type=str, callback=validate_postcode)
 @click.option('--option', required=True, type=click.Choice(['A', 'B', 'C', 'X'], case_sensitive=False))
-@click.option('--year', required=True, type=click.Choice(['2024', '2026']))
+@click.option('--popyear', required=True, type=click.Choice(['2024', '2026']))
+@click.option('--panyear', required=True, type=click.Choice(['2024', '2026']))
 @click.option('--prefs', required=True, nargs=3, type=str)
 @click.option('--debug', is_flag=True, default=False)
 @click.option('--geo_scaling', required=False, type=str, default=None)
 @click.option('--popularity_scaling', required=False, type=str, default=None)
 @click.option('--oversubscription_penalty', required=False, type=str, default=None)
-def sim(postcode, option, year, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty):
+def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty):
     if(debug):
         logging.basicConfig(level=logging.DEBUG)
 
@@ -479,14 +486,16 @@ def sim(postcode, option, year, prefs, debug, geo_scaling, popularity_scaling, o
         popularity_scaling = [float(c.strip()) for c in popularity_scaling.split(',')]
     if oversubscription_penalty:
         oversubscription_penalty = [float(c.strip()) for c in oversubscription_penalty.split(',')]
-    schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option], year,
+    schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', options[option],
+                                          popyear,
+                                          panyear,
                                           geo_scaling=geo_scaling,
                                           popularity_scaling=popularity_scaling,
                                           oversubscription_penalty=oversubscription_penalty)
 
     user_catchment = find_catchment(postcode, options[option])
     d(f"Your catchment is {user_catchment}")
-    children = create_population(schools_data, options[option], year)
+    children = create_population(schools_data, options[option], popyear)
 
     # look up preferred schools
     pref_school = []
@@ -557,9 +566,10 @@ def sim(postcode, option, year, prefs, debug, geo_scaling, popularity_scaling, o
         d(f"------- PREF {pref_rank} -----------")
         for school_id, school in schools_data.items():
             placed = find_qualified_apps_in_catchment(school, applications)
-            if school == pref_school:
+            if school.slug == pref_school[pref_rank]["school"].slug \
+                and school.catchment.slug == user_catchment:
                 pref_school[pref_rank]["catchment_chance"] = calculate_catchment_chance(
-                    placed, preference=pref_school[pref_rank]["school"]
+                    placed, pref_school[pref_rank]["school"]
                 )
             placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
             school.place(placed)
@@ -573,33 +583,52 @@ def sim(postcode, option, year, prefs, debug, geo_scaling, popularity_scaling, o
         d(f"------- PREF {pref_rank} -----------")
         for school_id, school in schools_data.items():
             placed = find_qualified_apps(school, applications)
-            if school == pref_school:
+            if school.slug == pref_school[pref_rank]["school"].slug \
+                and school.catchment.slug != user_catchment:
                 pref_school[pref_rank]["outofcatchment_chance"] = calculate_catchment_chance(
-                    placed, preference=pref_school[pref_rank]["school"]
+                    placed, pref_school[pref_rank]["school"]
                 )
             placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
             school.place(placed)
     d("\n")
 
-    summarise_applications(options[option], schools_data, applications)
-    summarise_placed(schools_data)
+    #summarise_applications(options[option], schools_data, applications)
+    #summarise_placed(schools_data)
 
-    d(f"------- PLACING FALLBACK -----------")
-    for pref_rank in (3, 4, 5):
-        d(f"------- PREF {pref_rank} -----------")
-        for school_id, school in schools_data.items():
-            placed = find_qualified_apps(school, applications)
-            if school == pref_school:
-                pref_school[pref_rank]["fallback_chance"] = calculate_catchment_chance(
-                    placed, preference=pref_school[pref_rank]["school"]
-                )
-            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
-            school.place(placed)
-    d("\n")
+    #d(f"------- PLACING FALLBACK -----------")
+    #for pref_rank in (3, 4, 5):
+    #    d(f"------- PREF {pref_rank} -----------")
+    #    for school_id, school in schools_data.items():
+    #        placed = find_qualified_apps(school, applications)
+    #        if school.slug == pref_school[pref_rank]["school"].slug:
+    #            pref_school[pref_rank]["fallback_chance"] = calculate_catchment_chance(
+    #                placed, pref_school[pref_rank]["school"]
+    #            )
+    #        placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+    #        school.place(placed)
+    #d("\n")
 
     d(f"------- SUMMARIES -----------")
     summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
+
+    summarise_chances(option, pref_school, schools_data)
+
+def summarise_chances(option, pref_school, schools_data, fsm=False):
+    # calculate compound chance of NOT getting school and invert
+    k_applicable = ['catchment_chance', 'outofcatchment_chance']
+    if fsm:
+        k_applicable.append('fsm_chance')
+    for school in pref_school:
+        no_chance = 1.0
+        o(f"{school['school'].slug}")
+        for k in k_applicable:
+            chance = school[k]
+            o(f"Chance for {k}: {chance}")
+            no_chance *= (1 - chance)
+        tot_chance = 1 - no_chance
+        o(f"Overall no_chance = {no_chance} therefore chance is {tot_chance}")
+
 
 @main.command()
 @click.option('--option', required=True, type=click.Choice(['A', 'B', 'C', 'X'], case_sensitive=False))
@@ -610,7 +639,8 @@ def sim(postcode, option, year, prefs, debug, geo_scaling, popularity_scaling, o
 @click.option('--damping', required=False, type=float, default=0.01)
 @click.option('--schedule', required=False, type=str, default="linear")
 @click.option('--tmax', required=False, type=float, default=500.0)
-def anneal(option, year, geo_scaling, popularity_scaling, oversubscription_penalty, damping, schedule, tmax):
+@click.option('--step_max', required=False, type=int, default=1000)
+def anneal(option, year, geo_scaling, popularity_scaling, oversubscription_penalty, damping, schedule, tmax, step_max):
     # used for simulated annleaing of preference factors
     # usage:
     # pip install jupyterlab
@@ -644,7 +674,7 @@ def anneal(option, year, geo_scaling, popularity_scaling, oversubscription_penal
     cost_func = partial(anneal_iterate, schools_data, option, year)
     # min max
     bounds = ((0.0001, 30.0),)*len(geo_scaling)*3
-    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=tmax,
+    mini = minimize(cost_func, x0, opt_mode='continuous', t_max=tmax, step_max=step_max,
                     bounds=bounds, cooling_schedule=schedule, damping=damping)
     mini.results()
     o("Final params")
@@ -668,7 +698,7 @@ def get_prefs_dist(schools, children):
 
 def anneal_cost(schools, applications):
     dist = get_prefs_dist(schools, applications)
-    print(dist)
+    o(dist)
     cost = 0
     for school_slug, school in schools.items():
         cost += abs(dist[school_slug][0] - school.first_prefs_received)
