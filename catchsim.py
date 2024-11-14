@@ -494,6 +494,9 @@ def main():
 @click.option('--popularity_scaling', required=False, type=str, default=None)
 @click.option('--oversubscription_penalty', required=False, type=str, default=None)
 def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty, fsm):
+    sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty, fsm)
+
+def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty, fsm):
     if(debug):
         logging.basicConfig(level=logging.DEBUG)
 
@@ -655,7 +658,7 @@ def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularit
         disp.append(f"Your chance of placing at {school['school'].name} is {percs[ind]}%.")
     disp.append(f"Your chance of placing at no school and being assigned a fallback is {percs[3]}%.")
 
-    o(disp)
+    return disp
 
 def summarise_chances(option, pref_school, schools_data, fsm=False):
     # chance of first school q0 = p(0)
