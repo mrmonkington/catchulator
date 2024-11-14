@@ -39,7 +39,7 @@ SORT_KEY_MAX=int(10e9)
 
 import logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.WARN)
+logging.basicConfig(level=logging.INFO)
 
 lsoa_gdf = read_file('BrightonLSOA_Clean.geojson')
 
@@ -50,9 +50,10 @@ def dtab(d: dict):
     logging.debug("\n" + pformat(d))
 
 def o(msg):
-    print(str(msg))
+    s = stack_size2a()
+    logging.info((s*" ") + str(msg))
 def otab(d: dict):
-    print(pformat(d))
+    logging.info("\n" + pformat(d))
 
 def get_lsoa_centroid(lsoa):
     return GeoDataFrame(
@@ -129,6 +130,9 @@ class School:
     apps_expected: int = 0
     placed: list = field(default_factory=list)
     remaining: int = 0
+    catchment_capacity: int = 0
+    # out of catchment capacity
+    oo_catchment_capacity: int = 0
 
     def __post_init__(self):
         self.remaining = self.pan
@@ -261,11 +265,25 @@ def find_qualified_apps_in_catchment(school, applications) -> float:
     return qualified
     # return qualified[0:school.remaining]
 
+def calculate_oo_catchment_chance(applications, school) -> float:
+    # include self
+    expected = len(applications) + 1
+    # can't place more FSM than we have places remaining after EHCP, sibling, etc
+    remaining = school.oo_catchment_capacity
+    d(f"School: {school.slug}")
+    d(f"Remaining: {remaining}")
+    d(f"Expected: {expected}")
+    if remaining == 0:
+        return 0.0
+    if expected <= remaining:
+        return 1.0
+    return float(remaining)/float(expected)
+
 def calculate_catchment_chance(applications, school) -> float:
     # include self
     expected = len(applications) + 1
     # can't place more FSM than we have places remaining after EHCP, sibling, etc
-    remaining = school.remaining
+    remaining = school.catchment_capacity
     d(f"School: {school.slug}")
     d(f"Remaining: {remaining}")
     d(f"Expected: {expected}")
@@ -471,10 +489,11 @@ def main():
 @click.option('--panyear', required=True, type=click.Choice(['2024', '2026']))
 @click.option('--prefs', required=True, nargs=3, type=str)
 @click.option('--debug', is_flag=True, default=False)
+@click.option('--fsm', is_flag=True, default=False)
 @click.option('--geo_scaling', required=False, type=str, default=None)
 @click.option('--popularity_scaling', required=False, type=str, default=None)
 @click.option('--oversubscription_penalty', required=False, type=str, default=None)
-def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty):
+def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularity_scaling, oversubscription_penalty, fsm):
     if(debug):
         logging.basicConfig(level=logging.DEBUG)
 
@@ -543,9 +562,10 @@ def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularit
     summarise_placed(schools_data)
 
     # this would just be FSM target / FSM expected
-    pref_school[0]["fsm_chance"] = calculate_fsm_chance(
-        pref_school[0]["school"]
-    )
+    for pref_rank in (0, 1, 2):
+        pref_school[pref_rank]["fsm_chance"] = calculate_fsm_chance(
+            pref_school[pref_rank]["school"]
+        )
 
     d(f"------- PLACING FSM (FIRST PREF) -----------")
     # assume FSM is hit on first pass so just do this once
@@ -561,34 +581,48 @@ def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularit
     summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
 
+    # set catchment capacity as current remaining spaces
+    for school_id, school in schools_data.items():
+        school.catchment_capacity = school.remaining
+
     d(f"------- PLACING CATCHMENT -----------")
     for pref_rank in (0, 1, 2):
         d(f"------- PREF {pref_rank} -----------")
+        school = pref_school[pref_rank]["school"]
+        if school.catchment.slug == user_catchment:
+            qual = find_qualified_apps_in_catchment(school, applications)
+            pref_school[pref_rank]["catchment_chance"] = calculate_catchment_chance(
+                qual, pref_school[pref_rank]["school"]
+            )
+    for pref_rank in (0, 1, 2):
+        d(f"------- PREF {pref_rank} -----------")
         for school_id, school in schools_data.items():
-            placed = find_qualified_apps_in_catchment(school, applications)
-            if school.slug == pref_school[pref_rank]["school"].slug \
-                and school.catchment.slug == user_catchment:
-                pref_school[pref_rank]["catchment_chance"] = calculate_catchment_chance(
-                    placed, pref_school[pref_rank]["school"]
-                )
-            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+            qual = find_qualified_apps_in_catchment(school, applications)
+            placed, applications = accept_offers(applications, qual, school.remaining, preference=pref_rank)
             school.place(placed)
     d("\n")
 
     summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
 
+    # set out of catchment capacity as current remaining spaces
+    for school_id, school in schools_data.items():
+        school.oo_catchment_capacity = school.remaining
+
     d(f"------- PLACING OUT OF CATCHMENT -----------")
     for pref_rank in (0, 1, 2):
         d(f"------- PREF {pref_rank} -----------")
+        school = pref_school[pref_rank]["school"]
+        if school.catchment.slug != user_catchment:
+            qual = find_qualified_apps(school, applications)
+            pref_school[pref_rank]["outofcatchment_chance"] = calculate_oo_catchment_chance(
+                qual, pref_school[pref_rank]["school"]
+            )
+    for pref_rank in (0, 1, 2):
+        d(f"------- PREF {pref_rank} -----------")
         for school_id, school in schools_data.items():
-            placed = find_qualified_apps(school, applications)
-            if school.slug == pref_school[pref_rank]["school"].slug \
-                and school.catchment.slug != user_catchment:
-                pref_school[pref_rank]["outofcatchment_chance"] = calculate_catchment_chance(
-                    placed, pref_school[pref_rank]["school"]
-                )
-            placed, applications = accept_offers(applications, placed, school.remaining, preference=pref_rank)
+            qual = find_qualified_apps(school, applications)
+            placed, applications = accept_offers(applications, qual, school.remaining, preference=pref_rank)
             school.place(placed)
     d("\n")
 
@@ -612,14 +646,31 @@ def sim(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popularit
     summarise_applications(options[option], schools_data, applications)
     summarise_placed(schools_data)
 
-    summarise_chances(option, pref_school, schools_data)
+    chances = summarise_chances(option, pref_school, schools_data, fsm)
+
+    percs = humanise_chances(pref_school, chances)
+
+    disp = []
+    for ind, school in enumerate(pref_school[:3]):
+        disp.append(f"Your chance of placing at {school['school'].name} is {percs[ind]}%.")
+    disp.append(f"Your chance of placing at no school and being assigned a fallback is {percs[3]}%.")
+
+    o(disp)
 
 def summarise_chances(option, pref_school, schools_data, fsm=False):
+    # chance of first school q0 = p(0)
+    # chance of second school q1 = p(^0 & 1) = (1-p(0)) * p(1)
+    # chance of third school q2 = p(^0 & ^1 & 2) = (1-p(0)) * (1-p(1)) * p(2)
+    # chance of fall back q3 = 1-(q2 + q1 + q0)
+
+    p = [0.0] * 3
+    q = [0.0] * 4
+
     # calculate compound chance of NOT getting school and invert
     k_applicable = ['catchment_chance', 'outofcatchment_chance']
     if fsm:
         k_applicable.append('fsm_chance')
-    for school in pref_school:
+    for ind, school in enumerate(pref_school):
         no_chance = 1.0
         o(f"{school['school'].slug}")
         for k in k_applicable:
@@ -628,6 +679,26 @@ def summarise_chances(option, pref_school, schools_data, fsm=False):
             no_chance *= (1 - chance)
         tot_chance = 1 - no_chance
         o(f"Overall no_chance = {no_chance} therefore chance is {tot_chance}")
+        p[ind] = tot_chance
+
+    q[0] = p[0]
+    q[1] = (1-p[0]) * p[1]
+    q[2] = (1-p[0]) * (1-p[1]) * p[2]
+    q[3] = 1 - (q[2] + q[1] + q[0])
+
+    return q
+
+def nearest_perc_chunk(x, chunk=10):
+    return int(chunk * round(x*100/chunk))
+
+def humanise_chances(pref_school, chances):
+    # clamp to nearest 10
+    percs = [nearest_perc_chunk(c) for c in chances]
+    if sum(percs) < 100:
+        # optimism about last choice if total < 100 due to rounding
+        percs[2] += 100 - sum(percs)
+
+    return percs
 
 
 @main.command()
