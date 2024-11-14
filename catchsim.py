@@ -712,17 +712,14 @@ def humanise_chances(pref_school, chances):
 @click.option('--tmax', required=False, type=float, default=500.0)
 @click.option('--step_max', required=False, type=int, default=1000)
 def anneal(option, year, geo_scaling, popularity_scaling, oversubscription_penalty, damping, schedule, tmax, step_max):
-    # used for simulated annleaing of preference factors
-    # usage:
-    # pip install jupyterlab
-    # jupyter lab
-    # > improt catchsim
-    # > mini = catchsim.anneal("B", 2024)
-    # wait an hour and get final params
-    # > mini.current_state
+    # usage
+    # anneal pref params to match actuals for 2024
+    # use initial completely naive values
+    # python catchsim.py anneal --option X --year 2024 --geo_scaling "1, 1, 1, 1, 1, 1, 1, 1, 1, 1" --popularity_scaling="1, 1, 1, 1, 1, 1, 1, 1, 1, 1" --oversubscription_penalty="1, 1, 1, 1, 1, 1, 1, 1, 1, 1" --tmax 500 --schedule quadratic --damping 0.05 --step_max 10000
+
     option = options[option]
 
-    schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', option, year)
+    schools_data: dict = read_school_data('secondary_admissions_actuals_2425.csv', option, year, year)
 
     # vars to iterate
     # geo_scaling
