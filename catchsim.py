@@ -200,6 +200,17 @@ def summarise_applications(option, schools, applications):
     summarise_app_children(option, schools, applications)
     #d(applications)
 
+def summarise_preferences(children):
+    d("preference summary")
+    from collections import defaultdict
+    prefs = defaultdict(int)
+    for child in children:
+        p = tuple(pref.slug for pref in child.prefs)
+        prefs[p] += 1
+    prefs = sorted(prefs.items(), key=lambda a: a[1], reverse=True)
+    otab(prefs)
+    #d(applications)
+
 def summarise_placed(schools):
     d("Placed summary")
     t = 0
@@ -344,16 +355,17 @@ def create_population(schools, option, popyear) -> list:
             mins = flows.loc[(lsoa, urn)].iloc[0]
             # make it a bit nonlinear using geo factors - e.g. faith schools attract from further away
             # higher is better
-            difficulty = math.exp(-1 * school.geo_scaling * mins)
+            # max is 1 when there is no distance between child and school
+            score = math.exp(-1 * school.geo_scaling * mins)
             # scale by popularity factors - e.g. faith schools don't attract atheists
             # e.g. poor ofsted will count against a little
             # higher is better
-            difficulty = difficulty * school.popularity_scaling
+            score = score * school.popularity_scaling
             # also consider in catchment and oversubscription - no point going for a popular school out of catchment
             # higher is better
             if template_child.catchment.slug != school.catchment.slug:
-               difficulty = difficulty * school.oversubscription_penalty
-            pop_flow.append((urn, difficulty))
+               score = score * school.oversubscription_penalty
+            pop_flow.append((urn, score))
         # d(pop_flow)
         # closest first
         pop_flow.sort(reverse=True, key=lambda s: s[1])
@@ -518,6 +530,7 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
     user_catchment = find_catchment(postcode, options[option])
     d(f"Your catchment is {user_catchment}")
     children = create_population(schools_data, options[option], popyear)
+    summarise_preferences(children)
 
     # look up preferred schools
     pref_school = []

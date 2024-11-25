@@ -1,67 +1,119 @@
 ---
+- slug: Z
+  prefs: 4
+  name: Option Z - Fuzzy Catchments
+  geofile: 'catchment_z.geojson'
+  catchments:
+    # IDs must match those used in geojson for option
+    - slug: PACA
+      name: PACA
+      out_of_catchment_pri: True
+    - slug: Hove
+      name: Hove
+      out_of_catchment_pri: False
+    - slug: Patcham
+      name: Patcham
+      out_of_catchment_pri: True
+    - slug: BACA
+      name: BACA
+      out_of_catchment_pri: True
+    - slug: VarndeanStr
+      name: VarndeanStr
+      out_of_catchment_pri: False
+    - slug: Longhill
+      name: Longhill
+      out_of_catchment_pri: True
 - slug: X
+  prefs: 3
   name: Option X - Existing
   geofile: 'catchment_existing_converted.geojson'
   catchments:
     # IDs must match those used in geojson for option
     - slug: PACA
       name: PACA
+      out_of_catchment_pri: False
     - slug: Hove
       name: Hove
+      out_of_catchment_pri: False
     - slug: Patcham
       name: Patcham
+      out_of_catchment_pri: False
     - slug: BACA
       name: BACA
+      out_of_catchment_pri: False
     - slug: VarndeanStr
       name: VarndeanStr
+      out_of_catchment_pri: False
     - slug: Longhill
       name: Longhill
+      out_of_catchment_pri: False
 - slug: A
+  prefs: 3
   name: Option A - Tweak
   geofile: 'catchment_01.geojson'
   catchments:
     # IDs must match those used in geojson for option
     - slug: PACA
       name: PACA
+      out_of_catchment_pri: False
     - slug: Hove
       name: Hove
+      out_of_catchment_pri: False
     - slug: Patcham
       name: Patcham
+      out_of_catchment_pri: False
     - slug: BACA
       name: BACA
+      out_of_catchment_pri: False
     - slug: VarndeanStr
       name: VarndeanStr
+      out_of_catchment_pri: False
     - slug: Longhill
       name: Longhill
+      out_of_catchment_pri: False
 - slug: B
+  prefs: 3
   name: Option B - Mega
   geofile: 'catchment_02.geojson'
   catchments:
     - slug: PACA
       name: PACA
+      out_of_catchment_pri: False
     - slug: Hove
       name: Hove
+      out_of_catchment_pri: False
     - slug: NorthBTN
       name: North Brighton
+      out_of_catchment_pri: False
     - slug: SouthBTN
       name: South Brighton
+      out_of_catchment_pri: False
 - slug: C
+  prefs: 3
   name: Option C - Single Catchments
   geofile: 'catchment_03.geojson'
   catchments:
     - slug: PACA
       name: PACA
+      out_of_catchment_pri: False
     - slug: Hove
       name: Hove
+      out_of_catchment_pri: False
     - slug: Blatchingt
       name: Blatchington Mill
+      out_of_catchment_pri: False
     - slug: Patcham
       name: Patcham
+      out_of_catchment_pri: False
     - slug: BACA
       name: BACA
+      out_of_catchment_pri: False
     - slug: Varndean
       name: Varndean
+      out_of_catchment_pri: False
     - slug: Stringer
       name: Stringer
+      out_of_catchment_pri: False
     - slug: Longhill
       name: Longhill
+      out_of_catchment_pri: False
