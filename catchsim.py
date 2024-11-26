@@ -15,6 +15,10 @@ from itertools import count
 import sys
 import math
 
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # use a population scaling for CASA's projections to create same populations as estimated
 # by BHCC
 POP_SCALING = {
@@ -33,27 +37,23 @@ def stack_size2a(size=2):
         if not frame:
             return size
 
-
 SORT_KEY_MIN=int(-10e9)
 SORT_KEY_MAX=int(10e9)
 
-import logging
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 lsoa_gdf = read_file('BrightonLSOA_Clean.geojson')
 
 def d(msg):
     s = stack_size2a()
-    logging.debug((s*" ") + str(msg))
+    logger.debug((s*" ") + str(msg))
 def dtab(d: dict):
-    logging.debug("\n" + pformat(d))
+    logger.debug("\n" + pformat(d))
 
 def o(msg):
     s = stack_size2a()
-    logging.info((s*" ") + str(msg))
+    logger.info((s*" ") + str(msg))
 def otab(d: dict):
-    logging.info("\n" + pformat(d))
+    logger.info("\n" + pformat(d))
 
 def get_lsoa_centroid(lsoa):
     return GeoDataFrame(
