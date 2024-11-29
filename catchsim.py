@@ -67,6 +67,7 @@ def get_lsoa_centroid(lsoa):
 class Catchment:
     slug: str
     name: str
+    out_of_catchment_pri: bool = False
     # total of all schools in catchment
     pan: int = 0
     # how many children live in catchment
@@ -226,7 +227,7 @@ def find_qualified_apps(school, applications) -> list[Application]:
     c = len(qualified)
     if c > 0:
         d(qualified[0].sort_key)
-    d(f" - Found {c} qualified apps")
+    # d(f" - Found {c} qualified apps")
     # return qualified[0:count]
     return qualified
 
@@ -272,7 +273,7 @@ def find_qualified_apps_in_catchment(school, applications) -> float:
     )
     qualified.sort(key=lambda a: a.sort_key)
     c = len(qualified)
-    d(f" - Found {c} qualified apps")
+    # d(f" - Found {c} qualified apps")
     return qualified
     # return qualified[0:school.remaining]
 
@@ -311,6 +312,8 @@ class Option:
     name: str
     catchments: dict[Catchment]
     geo: GeoDataFrame 
+    # number of preferences in this model
+    prefs: int = 3
 
 
 @dataclass
@@ -320,10 +323,62 @@ class LA:
     apps_expected: int
     fsm_expected: int
 
+def calc_school_score_basic(option, school, child, distance):
+    """
+        v1 of distance rolloff using exp(w * -x) curve, which is too steep
+    """
+    # make it a bit nonlinear using geo factors - e.g. faith schools attract from further away
+    # higher is better
+    # max is 1 when there is no distance between child and school
+    score = math.exp(-1 * school.geo_scaling * distance)
+    # scale by popularity factors - e.g. faith schools don't attract atheists
+    # e.g. poor ofsted will count against a little
+    # higher is better
+    score = score * school.popularity_scaling
+    # also consider in catchment and oversubscription - no point going for a popular school out of catchment
+    # higher is better
+    if child.catchment.slug != school.catchment.slug:
+       score = score * school.oversubscription_penalty
+    return score
+
+def calc_school_score_cubic(option, school, child, distance):
+    """
+        v1 of distance rolloff using cubic easing curve from 0 -> geo_scaling mins
+        with max of 1 and floor value of 0.2 (i.e. never zeroes out the score)
+    """
+    # this is effectively max distance most children would travel
+    window_size = school.geo_scaling
+    floor = 0.2
+    # make it a bit nonlinear using geo factors - e.g. faith schools attract from further away
+    # higher is better
+    # max is 1 when there is no distance between child and school
+    # use cubice easing at either end of window
+    if distance > window_size:
+        score = floor
+    elif distance >= 0.0 and distance < (window_size / 2):
+        score = 1 \
+            - 4 * math.pow(distance / window_size, 3) * (1 - floor) \
+            + floor
+    elif distance >= (window_size / 2) and distance <= window_size:
+        score =  pow(-2 * (distance / window_size) + 2, 3) / 2 * (1 - floor) \
+            + floor
+    else:
+        # should never get here
+        score = 1.0
+    # scale by popularity factors - e.g. faith schools don't attract atheists
+    # e.g. poor ofsted will count against a little
+    # higher is better
+    score = score * school.popularity_scaling
+    # also consider in catchment and oversubscription - no point going for a popular school out of catchment
+    # higher is better
+    if child.catchment.slug != school.catchment.slug:
+       score = score * school.oversubscription_penalty
+    return score
+
 def create_population(schools, option, popyear) -> list:
     # read in flows for LSOAs and populations, and synthesise
     # a list of imaginary children with school preferences
-    # based on distance alone
+    # based on distance/reputation/expectation scoring
     population_centres: dict = {}
     with open("bh_lsoa_projections_2020_31.csv") as file_obj:
         reader_object = csv.DictReader(file_obj)
@@ -346,25 +401,15 @@ def create_population(schools, option, popyear) -> list:
         template_child: Child = Child(
             lsoa=lsoa
         )
-        d(f"LSOA {lsoa} ")
+        # d(f"LSOA {lsoa} ")
         template_child.locate(option)
         for school_id, school in schools.items():
             urn = school.urn
             # how hard to get to school? Start with 'mins away'
             # higher is worse
             mins = flows.loc[(lsoa, urn)].iloc[0]
-            # make it a bit nonlinear using geo factors - e.g. faith schools attract from further away
-            # higher is better
-            # max is 1 when there is no distance between child and school
-            score = math.exp(-1 * school.geo_scaling * mins)
-            # scale by popularity factors - e.g. faith schools don't attract atheists
-            # e.g. poor ofsted will count against a little
-            # higher is better
-            score = score * school.popularity_scaling
-            # also consider in catchment and oversubscription - no point going for a popular school out of catchment
-            # higher is better
-            if template_child.catchment.slug != school.catchment.slug:
-               score = score * school.oversubscription_penalty
+            # score = calc_school_score_basic(option, school, template_child, mins)
+            score = calc_school_score_cubic(option, school, template_child, mins)
             pop_flow.append((urn, score))
         # d(pop_flow)
         # closest first
@@ -381,8 +426,8 @@ def create_population(schools, option, popyear) -> list:
             get_school_by_urn(schools, prefs[5][0]),
         ]
         template_child.prefs=pref_template
-        d(f"Prefs for {lsoa} x {pop} kids in catchment {template_child.catchment.slug}")
-        d(pformat([p.slug for p in pref_template]))
+        # d(f"Prefs for {lsoa} x {pop} kids in catchment {template_child.catchment.slug}")
+        # d(pformat([p.slug for p in pref_template]))
         for i in range(0, pop):
             child_instance = copy.deepcopy(template_child)
             # just need an ID for hashing
@@ -469,10 +514,10 @@ def reverse_catchment(point_geo, catchment_geo):
 
     if not joined_gdf.empty:
         overlapping_feature = joined_gdf.iloc[0]
-        d(f"found catchment {overlapping_feature['catchment']}")
+        # d(f"found catchment {overlapping_feature['catchment']}")
         return overlapping_feature['catchment']
     else:
-        d("Point doesn't intersect with any polygon")
+        # d("Point doesn't intersect with any polygon")
         return False
 
 def validate_postcode(ctx, param, value):
@@ -560,7 +605,7 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
 
     d("\n")
 
-    summarise_placed(schools_data)
+    # summarise_placed(schools_data)
 
     d(f"------- PLACING SIBLING (FIRST PREF) -----------")
     for school_id, school in schools_data.items():
@@ -575,7 +620,7 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
         school.place(placed)
     d("\n")
 
-    summarise_placed(schools_data)
+    # summarise_placed(schools_data)
 
     # this would just be FSM target / FSM expected
     for pref_rank in (0, 1, 2):
@@ -595,7 +640,7 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
     d("\n")
 
     summarise_applications(options[option], schools_data, applications)
-    summarise_placed(schools_data)
+    # summarise_placed(schools_data)
 
     # set catchment capacity as current remaining spaces
     for school_id, school in schools_data.items():
@@ -618,8 +663,8 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
             school.place(placed)
     d("\n")
 
-    summarise_applications(options[option], schools_data, applications)
-    summarise_placed(schools_data)
+    #summarise_applications(options[option], schools_data, applications)
+    #summarise_placed(schools_data)
 
     # set out of catchment capacity as current remaining spaces
     for school_id, school in schools_data.items():
@@ -659,8 +704,8 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
     #d("\n")
 
     d(f"------- SUMMARIES -----------")
-    summarise_applications(options[option], schools_data, applications)
-    summarise_placed(schools_data)
+    #summarise_applications(options[option], schools_data, applications)
+    #summarise_placed(schools_data)
 
     chances = summarise_chances(option, pref_school, schools_data, fsm)
 
@@ -670,6 +715,8 @@ def sim_run(postcode, option, popyear, panyear, prefs, debug, geo_scaling, popul
     for ind, school in enumerate(pref_school[:3]):
         disp.append(f"Your chance of placing at {school['school'].name} is {percs[ind]}%.")
     disp.append(f"Your chance of placing at no school and being assigned a fallback is {percs[3]}%.")
+
+    d(disp)
 
     return disp
 
@@ -723,7 +770,7 @@ def humanise_chances(pref_school, chances):
 @click.option('--geo_scaling', required=False, type=str, default=None)
 @click.option('--popularity_scaling', required=False, type=str, default=None)
 @click.option('--oversubscription_penalty', required=False, type=str, default=None)
-@click.option('--damping', required=False, type=float, default=0.01)
+@click.option('--damping', required=False, type=str, default=None)
 @click.option('--schedule', required=False, type=str, default="linear")
 @click.option('--tmax', required=False, type=float, default=500.0)
 @click.option('--step_max', required=False, type=int, default=1000)
@@ -752,23 +799,41 @@ def anneal(option, year, geo_scaling, popularity_scaling, oversubscription_penal
         oversubscription_penalty = [float(c.strip()) for c in oversubscription_penalty.split(',')]
     else:
         oversubscription_penalty = [school.oversubscription_penalty for school_slug, school in schools_data.items()]
+
+    x0 = geo_scaling + popularity_scaling + oversubscription_penalty
+
+    if damping:
+        damping = [float(c.strip()) for c in damping.split(',')]
+    else:
+        damping = [0.1] * 3
+    # just 3 vals means use equal damping for all params
+    if len(damping) == 1:
+        damping = damping * len(x0)
+    # just 3 vals means use equal damping for each param set
+    if len(damping) == 3:
+        damping = [damping[0]] * len(geo_scaling) \
+                    + [damping[1]] * len(geo_scaling) \
+                    + [damping[2]] * len(geo_scaling)
+    print(damping)
+
     from anneal import minimize
     from functools import partial
-    x0 = geo_scaling + popularity_scaling + oversubscription_penalty
     cost_func = partial(anneal_iterate, schools_data, option, year)
     # min max
-    bounds = ((0.0001, 30.0),)*len(geo_scaling)*3
+    bounds = ((0.0001, 180.0),)*len(geo_scaling) \
+                + ((0.0001, 30.0),)*len(geo_scaling) \
+                + ((0.0001, 30.0),)*len(geo_scaling)
     mini = minimize(cost_func, x0, opt_mode='continuous', t_max=tmax, step_max=step_max,
                     bounds=bounds, cooling_schedule=schedule, damping=damping)
     mini.results()
     o("Final params")
     ns = len(schools_data)
     o("print geo:")
-    o(mini.current_state[0:ns])
+    o(mini.best_state[0:ns])
     o("print pop:")
-    o(mini.current_state[ns:2*ns])
+    o(mini.best_state[ns:2*ns])
     o("print overpen:")
-    o(mini.current_state[2*ns:])
+    o(mini.best_state[2*ns:])
 
 
 def get_prefs_dist(schools, children):
@@ -782,12 +847,12 @@ def get_prefs_dist(schools, children):
 
 def anneal_cost(schools, applications):
     dist = get_prefs_dist(schools, applications)
-    o(dist)
+    print(dist)
     cost = 0
     for school_slug, school in schools.items():
-        cost += abs(dist[school_slug][0] - school.first_prefs_received)
-        cost += abs(dist[school_slug][1] - school.second_prefs_received)
-        cost += abs(dist[school_slug][2] - school.third_prefs_received)
+        cost += abs(dist[school_slug][0] - school.first_prefs_received) / school.first_prefs_received
+        cost += abs(dist[school_slug][1] - school.second_prefs_received) / school.second_prefs_received
+        cost += abs(dist[school_slug][2] - school.third_prefs_received) / school.third_prefs_received
     return cost
 
 def anneal_iterate(schools_data, option, year, x):

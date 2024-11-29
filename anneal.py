@@ -9,12 +9,15 @@ class minimize():
     '''Simple Simulated Annealing
     '''
 
-    def __init__(self, func, x0, opt_mode, cooling_schedule='linear', step_max=1000, t_min=0, t_max=100, bounds=[], alpha=None, damping=1):
+    def __init__(self, func, x0, opt_mode, cooling_schedule='linear', step_max=1000, t_min=0, t_max=100, bounds=list(), alpha=None, damping=list()):
 
         # checks
         assert opt_mode in ['combinatorial','continuous'], 'opt_mode must be either "combinatorial" or "continuous"'
         assert cooling_schedule in ['linear','exponential','logarithmic', 'quadratic'], 'cooling_schedule must be either "linear", "exponential", "logarithmic", or "quadratic"'
 
+        if len(damping) == 0:
+            damping = [1.0] * len(x0)
+        assert len(damping) == len(x0)
 
         # initialize starting conditions
         self.t = t_max
@@ -33,6 +36,7 @@ class minimize():
         self.current_energy = func(self.x0)
         self.best_state = self.current_state
         self.best_energy = self.current_energy
+
 
 
         # initialize optimization scheme
@@ -112,7 +116,9 @@ class minimize():
 
     def move_continuous(self):
         # preturb current state by a random amount
-        neighbor = [item + ((random() - 0.5) * self.damping) for item in self.current_state]
+        neighbor = [item + ((random() - 0.5) * self.damping[index]) for index, item in enumerate(self.current_state)]
+        # neighbor = [item * ((2 * random() - 1) * self.damping / 2) for item in self.current_state]
+        print(neighbor)
 
         # clip to upper and lower bounds
         if self.bounds:
@@ -140,8 +146,7 @@ class minimize():
         print('+------------------------ RESULTS -------------------------+\n')
         print(f'      opt.mode: {self.opt_mode}')
         print(f'cooling sched.: {self.cooling_schedule}')
-        if self.damping != 1: print(f'       damping: {self.damping}\n')
-        else: print('\n')
+        print(f'       damping: {self.damping}\n')
 
         print(f'  initial temp: {self.t_max}')
         print(f'    final temp: {self.t:0.6f}')
