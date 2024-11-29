@@ -751,12 +751,16 @@ def summarise_chances(option, pref_school, schools_data, fsm=False):
 
     return q
 
-def nearest_perc_chunk(x, chunk=10):
-    return int(chunk * round(x*100/chunk))
+def nearest_perc_chunk(x, x_sub, chunk=10):
+    prev_tot = 0
+    if len(x_sub) > 1:
+        prev_tot = int(chunk * round(sum(x_sub[:-1])*100/chunk))
+    tot = int(chunk * round(sum(x_sub)*100/chunk))
+    return tot - prev_tot
 
 def humanise_chances(pref_school, chances):
     # clamp to nearest 10
-    percs = [nearest_perc_chunk(c) for c in chances]
+    percs = [nearest_perc_chunk(c, chances[:i+1]) for i, c in enumerate(chances)]
     if sum(percs) < 100:
         # optimism about last choice if total < 100 due to rounding
         percs[2] += 100 - sum(percs)
